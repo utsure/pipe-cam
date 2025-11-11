@@ -321,23 +321,27 @@
                 offsetY = (videoHeight - drawHeight) / 2;
             }
 
-            // 【修正ポイント1】左右反転の描画位置調整
-            // 反転の中心を明確にするため、translateを最初に適用し、その後でdrawImageでオフセットを調整
+            // 【修正ポイント1: 左右反転と中央寄せを分離】
             tempCtx.save();
-            tempCtx.translate(videoWidth, 0); // 右端を原点として反転
-            tempCtx.scale(-1, 1); // 左右反転
-            // drawImageのx座標は、反転後の空間で計算された offsetX になる
-            tempCtx.drawImage(cameraVideo, offsetX, offsetY, drawWidth, drawHeight);
+            
+            // 描画位置を調整（中央寄せ）
+            // この座標系で描画するために、drawImageの座標にオフセットを適用するのではなく、原点をオフセットする
+            tempCtx.translate(offsetX, offsetY); 
+
+            // 左右反転 (描画領域の幅に合わせてtranslateを調整)
+            tempCtx.translate(drawWidth, 0); 
+            tempCtx.scale(-1, 1); 
+
+            // 描画 (translateでオフセット済みのため、描画座標は (0, 0) から開始)
+            tempCtx.drawImage(cameraVideo, 0, 0, drawWidth, drawHeight);
             tempCtx.restore();
+
 
             const cameraImageData = tempCtx.getImageData(0, 0, videoWidth, videoHeight);
             const cameraData = cameraImageData.data;
 
             // 4. ピクセル処理（クロマキー + 円形合成）
-            // 【修正ポイント2】緑色判定の閾値と条件を調整
-            // 緑のRBG値が他のチャンネルよりも強く、かつRとBの合計よりも十分大きいことを確認
-            const greenThreshold = 80; 
-            const greenBias = 1.1; // 緑色へのバイアスを強める
+            const greenThreshold = 35; // 閾値を下げ、より幅広い色をキーアウト
 
             // 円のパラメータを定義 (映像の中心に固定された真円)
             const circle = {
@@ -352,9 +356,12 @@
                 const g = data[i + 1];
                 const b = data[i + 2];
 
-                // 【修正ポイント3】緑色判定ロジックの改善 (より厳密に緑色を認識)
-                // gがrとbよりも大きく、かつ特定の比率以上であるかを確認
-                const isGreen = g > r * greenBias && g > b * greenBias && g > (r + b) / 2 + greenThreshold;
+                // 【修正ポイント2: クロマキー判定ロジックの改善】
+                // HSL/HSVではなくRGBベースで、緑色成分が赤と青の合計から十分に離れているかを確認
+                const delta_g_rb = g - (r + b) / 2;
+                
+                // 緑色判定: gがrとbよりも十分に強く、かつある程度の明るさがあること
+                const isGreen = delta_g_rb > greenThreshold && g > Math.max(r, b);
 
                 if (isGreen) {
                     const pixelIndex = i / 4;
@@ -372,6 +379,7 @@
                         data[i + 2] = cameraData[i + 2];
                         data[i + 3] = cameraData[i + 3]; 
                     } else {
+                        // 円形外の緑色ピクセルは完全に透明化
                         data[i + 3] = 0; 
                     }
                 }
@@ -394,9 +402,8 @@
             startOverlayBtn.addEventListener('click', startOverlay);
             stopOverlayBtn.addEventListener('click', stopOverlay);
             
-            // cameraVideoがreadyState=4になったらメッセージを表示
             cameraVideo.addEventListener('canplay', () => {
-                if(cameraActive) { // カメラが実際に起動している場合のみ
+                if(cameraActive) { 
                     displayMessage("ウェブカメラ映像の準備ができました。", "info");
                 }
                 updateUI();
