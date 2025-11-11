@@ -124,11 +124,11 @@
 
                 <!-- 開発ヒントカード -->
                 <div class="rounded-xl shadow-2xl p-6 bg-slate-800 border border-slate-700">
-                    <h3 class="text-lg font-semibold text-white mb-3">重要な開発ヒント</h3>
+                    <h3 class="text-lg font-semibold text-white mb-3">デバッグと開発ヒント</h3>
                     <ul class="text-slate-300 space-y-1 text-sm list-disc list-inside ml-4">
-                        <li>**映像再生の問題解消:** `startOverlay()`関数内で、背景映像に対して明示的に `play()` を呼び出しています。</li>
-                        <li>**アスペクト比の歪み対策:** JavaScriptでCanvasの内部解像度を背景映像に合わせ、CSSの `aspect-ratio` で外側のコンテナの縦横比を固定しています。</li>
-                        <li>**円形マスクの調整:** `processFrame` 関数内の `circle` オブジェクトの `r` (半径) の値を変更することで、円のサイズを調整できます。</li>
+                        <li>**最重要:** F12キー（または右クリック > 検証）でデベロッパーツールを開き、**「Console（コンソール）」**タブを確認してください。エラーメッセージ（特にセキュリティ関連）が表示されます。</li>
+                        <li>**カメラアクセス:** `file://` プロトコル（ローカルで開いた場合）では、ブラウザがカメラアクセスをブロックすることが多いです。GitHub Pagesやローカルサーバー（例: `python -m http.server`）を使って `http://` や `https://` でアクセスしてください。</li>
+                        <li>**円形マスクの調整:** `processFrame` 関数内の `circle.r` の値を変更することで、円のサイズを調整できます。</li>
                     </ul>
                 </div>
             </div>
@@ -174,14 +174,18 @@
         }
         
         function updateUI() {
-            const fileLoaded = !!videoFile.src;
+            // videoFile.videoWidth > 0 でメタデータが読み込まれていることも確認
+            const fileLoadedAndReady = !!videoFile.src && videoFile.videoWidth > 0; 
+            
             startCameraBtn.disabled = cameraActive;
             stopCameraBtn.disabled = !cameraActive;
-            startOverlayBtn.disabled = isRunning || !cameraActive || !fileLoaded;
+            
+            // ファイルが読み込まれていて、カメラがアクティブな場合のみオーバーレイ開始可能
+            startOverlayBtn.disabled = isRunning || !cameraActive || !fileLoadedAndReady;
             stopOverlayBtn.disabled = !isRunning;
             
-            // ファイルがロードされていない場合、動画のコントロールを非表示にする
-            videoFile.controls = fileLoaded;
+            // ファイルがロードされている場合のみ、動画のコントロールを表示
+            videoFile.controls = !!videoFile.src;
         }
 
         // =================================================================
@@ -190,16 +194,19 @@
 
         async function startCamera() {
             try {
+                // streamGlobalが既に存在する場合は何もしない
+                if (streamGlobal) return; 
+
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: { facingMode: "user" },
                 });
                 cameraVideo.srcObject = stream;
                 streamGlobal = stream; // 停止のためにグローバルに保持
                 cameraActive = true;
-                displayMessage("カメラが起動しました。", "info");
+                displayMessage("カメラ起動中... ストリームの準備を待っています。", "info");
             } catch (error) {
                 console.error("カメラへのアクセスに失敗しました:", error);
-                displayMessage("カメラへのアクセスが許可されていません。ブラウザの設定を確認してください。", "error");
+                displayMessage("🚨 カメラへのアクセスが拒否されました。ブラウザの設定とHTTPS接続を確認してください。", "error");
             } finally {
                 updateUI();
             }
@@ -226,8 +233,9 @@
                 const url = URL.createObjectURL(file);
                 videoFile.src = url;
                 videoFile.load(); // メタデータロードを促す
-                displayMessage("映像ファイルを選択しました。ロード中です...", "info");
+                displayMessage("映像ファイルを選択しました。メタデータロード中...", "info");
             }
+            // updateUI は loadedmetadata イベント後に再度呼び出される
             updateUI();
         });
 
@@ -236,7 +244,7 @@
             if (videoFile.videoWidth > 0 && videoFile.videoHeight > 0) {
                 // CanvasコンテナのCSSアスペクト比を設定
                 canvasContainer.style.aspectRatio = `${videoFile.videoWidth} / ${videoFile.videoHeight}`;
-                displayMessage("映像ファイルのメタデータがロードされました。", "info");
+                displayMessage(`映像ファイルのメタデータがロードされました (${videoFile.videoWidth}x${videoFile.videoHeight})。`, "info");
             }
             stopOverlay(); // 映像が変わったら強制停止
             videoFile.currentTime = 0;
@@ -247,26 +255,30 @@
         // 合成制御
         // =================================================================
         function startOverlay() {
-            if (!videoFile.src || !cameraActive) {
-                displayMessage("映像ファイルが選択されていることと、カメラが起動していることを確認してください。", "error");
+            // 再度、最終チェック
+            if (!videoFile.src || !cameraActive || videoFile.videoWidth === 0) {
+                displayMessage("映像ファイルが読み込まれ、カメラが起動していることを確認してください。", "error");
                 return;
             }
 
-            if (videoFile.readyState < 2) {
-                 displayMessage("映像ファイルのロードが完了していません。少し待ってから再度お試しください。", "error");
+            // readyStateが4 (HAVE_ENOUGH_DATA)でなくても、2 (HAVE_CURRENT_DATA) 以上あれば進む
+            if (videoFile.readyState < 2) { 
+                 displayMessage("映像データの準備ができていません。もう少しお待ちください。", "error");
                  return;
             }
             
-            // 【問題解消】映像ファイルを明示的に再生
-            videoFile.play().catch(error => {
-                // 自動再生がブロックされた場合のエラー処理（Mutedなので基本発生しないはず）
+            // 映像ファイルを明示的に再生
+            videoFile.play().then(() => {
+                isRunning = true;
+                processFrame();
+                displayMessage("リアルタイム合成を開始しました。", "info");
+                updateUI();
+            }).catch(error => {
                 console.error("Video playback failed:", error);
+                displayMessage("🚨 動画再生がブロックされました。ブラウザが自動再生を許可しているか確認してください。", "error");
+                stopOverlay();
             });
 
-            isRunning = true;
-            processFrame();
-            displayMessage("リアルタイム合成を開始しました。", "info");
-            updateUI();
         }
 
         function stopOverlay() {
@@ -284,9 +296,10 @@
         // フレーム処理（コアロジック）
         // =================================================================
         function processFrame() {
+            // readyState >= 2 (HAVE_CURRENT_DATA) であれば描画可能
             if (!isRunning || !canvas || videoFile.readyState < 2 || cameraVideo.readyState < 2) {
-                // 停止中の場合、アニメーションフレームのループを終了
                 if (isRunning) {
+                     // 停止命令がない限り、再試行
                      animationFrameId = requestAnimationFrame(processFrame);
                 }
                 return;
@@ -295,7 +308,7 @@
             const ctx = canvas.getContext("2d", { willReadFrequently: true });
             if (!ctx) return;
 
-            // 描画が歪む問題対策: キャンバスの論理サイズを背景映像のネイティブ解像度に設定
+            // Canvasの論理サイズを背景映像のネイティブ解像度に設定
             const videoWidth = videoFile.videoWidth;
             const videoHeight = videoFile.videoHeight;
             canvas.width = videoWidth;
@@ -318,13 +331,9 @@
             const cameraAspect = cameraVideo.videoWidth / cameraVideo.videoHeight;
             const canvasAspect = videoWidth / videoHeight;
 
-            let drawWidth = videoWidth;
-            let drawHeight = videoHeight;
-            let offsetX = 0;
-            let offsetY = 0;
+            let drawWidth, drawHeight, offsetX = 0, offsetY = 0;
 
-            // 【アスペクト比修正】カメラ映像がキャンバス全体を覆うように描画サイズを調整 (Coverモード)
-            // この計算により、カメラ映像の歪みを防ぎ、キャンバス全体にフィットさせます
+            // カメラ映像がキャンバス全体を覆うように描画サイズを調整 (Coverモード)
             if (cameraAspect > canvasAspect) {
                 drawHeight = videoHeight;
                 drawWidth = videoHeight * cameraAspect;
@@ -399,6 +408,7 @@
         // 初期設定とイベントリスナー
         // =================================================================
         window.onload = function() {
+            console.log("Script loaded and window.onload executed.");
             // イベントリスナーの追加
             startCameraBtn.addEventListener('click', startCamera);
             stopCameraBtn.addEventListener('click', stopCamera);
