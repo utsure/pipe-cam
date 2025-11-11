@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>リアルタイム・円形クロマキー合成（HTML単一ファイル）</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Interフォントを適用 */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Canvasの親要素の最大高さを設定 */
+        #canvas-container {
+            max-height: 400px;
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 p-8">
+
+    <!-- カスタムメッセージコンテナ (alert代替) -->
+    <div id="message-container" class="fixed top-4 right-4 p-4 rounded-lg shadow-xl z-50 transition-all duration-300 transform -translate-y-full"></div>
+
+    <div class="max-w-7xl mx-auto">
+        <h1 class="text-4xl font-extrabold text-white mb-2 tracking-tight">📹 リアルタイム・円形クロマキー合成</h1>
+        <p class="text-slate-400 mb-8">
+            単一のHTMLファイルで完結するピクセル処理ベースの合成アプリケーションです。
+        </p>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <!-- 左側：入力映像 -->
+            <div class="space-y-6">
+                <!-- 背景映像カード -->
+                <div class="rounded-xl shadow-2xl p-6 bg-slate-800 border border-slate-700">
+                    <h2 class="text-xl font-semibold text-white mb-4 flex items-center">
+                        背景映像（ファイル）
+                    </h2>
+                    <video
+                        id="video-file"
+                        controls
+                        loop
+                        playsinline
+                        muted
+                        class="w-full rounded-xl shadow-inner border border-slate-700 bg-black"
+                        style="max-height: 400px;"
+                    ></video>
+                    <div class="mt-4">
+                        <label class="block text-sm font-medium text-slate-300 mb-2" for="file-input">
+                            映像ファイルを選択 (緑色部分を含むもの)
+                        </label>
+                        <input
+                            type="file"
+                            id="file-input"
+                            accept="video/*"
+                            class="block w-full text-sm text-slate-300 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-700 cursor-pointer"
+                        />
+                    </div>
+                </div>
+
+                <!-- ウェブカメラカード -->
+                <div class="rounded-xl shadow-2xl p-6 bg-slate-800 border border-slate-700">
+                    <h2 class="text-xl font-semibold text-white mb-4 flex items-center">
+                        🌐 ウェブカメラ映像
+                    </h2>
+                    <video
+                        id="camera-video"
+                        autoplay
+                        playsinline
+                        muted
+                        class="w-full rounded-xl shadow-inner border border-slate-700 bg-black"
+                        style="max-height: 400px;"
+                    ></video>
+                    <div class="mt-4 flex gap-3">
+                        <button
+                            id="start-camera-btn"
+                            class="flex-1 px-4 py-2 rounded-lg font-semibold transition duration-200 shadow-lg bg-green-500 hover:bg-green-600 text-white shadow-green-700/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            カメラ起動
+                        </button>
+                        <button
+                            id="stop-camera-btn"
+                            disabled
+                            class="flex-1 px-4 py-2 rounded-lg font-semibold transition duration-200 shadow-lg bg-red-500 hover:bg-red-600 text-white shadow-red-700/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            カメラ停止
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右側：出力映像とコントロール -->
+            <div class="space-y-6">
+                <!-- 合成結果カード -->
+                <div class="rounded-xl shadow-2xl p-6 bg-slate-800 border border-slate-700 relative">
+                    <h2 class="text-xl font-semibold text-white mb-4">
+                        🔬 合成結果（リアルタイムプレビュー）
+                    </h2>
+                    <div id="canvas-container" class="w-full rounded-xl overflow-hidden shadow-inner border border-slate-700 bg-black" style="aspect-ratio: 16 / 9;">
+                        <!-- Canvasをコンテナにフィットさせ、CSSによる歪みを防ぐ -->
+                        <canvas 
+                            id="output-canvas"
+                            class="w-full h-full"
+                        ></canvas>
+                    </div>
+                    <div class="mt-4 flex gap-3">
+                        <button
+                            id="start-overlay-btn"
+                            disabled
+                            class="flex-1 px-4 py-2 rounded-lg font-semibold transition duration-200 shadow-lg bg-blue-500 hover:bg-blue-600 text-white shadow-blue-700/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            🎥 合成開始
+                        </button>
+                        <button
+                            id="stop-overlay-btn"
+                            disabled
+                            class="flex-1 px-4 py-2 rounded-lg font-semibold transition duration-200 shadow-lg bg-yellow-500 hover:bg-yellow-600 text-slate-900 shadow-yellow-700/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            ⏸️ 合成停止
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 開発ヒントカード -->
+                <div class="rounded-xl shadow-2xl p-6 bg-slate-800 border border-slate-700">
+                    <h3 class="text-lg font-semibold text-white mb-3">重要な開発ヒント</h3>
+                    <ul class="text-slate-300 space-y-1 text-sm list-disc list-inside ml-4">
+                        <li>**映像再生の問題解消:** `startOverlay()`関数内で、背景映像に対して明示的に `play()` を呼び出しています。</li>
+                        <li>**アスペクト比の歪み対策:** JavaScriptでCanvasの内部解像度を背景映像に合わせ、CSSの `aspect-ratio` で外側のコンテナの縦横比を固定しています。</li>
+                        <li>**円形マスクの調整:** `processFrame` 関数内の `circle` オブジェクトの `r` (半径) の値を変更することで、円のサイズを調整できます。</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // DOM要素の参照
+        const videoFile = document.getElementById('video-file');
+        const cameraVideo = document.getElementById('camera-video');
+        const canvas = document.getElementById('output-canvas');
+        const canvasContainer = document.getElementById('canvas-container');
+        const fileInput = document.getElementById('file-input');
+
+        const startCameraBtn = document.getElementById('start-camera-btn');
+        const stopCameraBtn = document.getElementById('stop-camera-btn');
+        const startOverlayBtn = document.getElementById('start-overlay-btn');
+        const stopOverlayBtn = document.getElementById('stop-overlay-btn');
+
+        // 状態変数
+        let isRunning = false;
+        let cameraActive = false;
+        let animationFrameId = null;
+        let streamGlobal = null;
+
+        // =================================================================
+        // メッセージ・UI制御
+        // =================================================================
+        function displayMessage(text, type = 'info') {
+            const messageContainer = document.getElementById('message-container');
+            if (messageContainer) {
+                messageContainer.textContent = text;
+                // スタイル設定
+                let bgColor = type === 'error' ? 'bg-red-600' : 'bg-blue-600';
+                messageContainer.className = `fixed top-4 right-4 p-4 rounded-lg shadow-xl z-50 transition-all duration-300 transform translate-y-0 ${bgColor} text-white`;
+                
+                // 5秒後に非表示
+                setTimeout(() => {
+                    messageContainer.className = 'fixed top-4 right-4 transition-all duration-300 transform -translate-y-full';
+                    messageContainer.textContent = '';
+                }, 5000);
+            }
+        }
+        
+        function updateUI() {
+            const fileLoaded = !!videoFile.src;
+            startCameraBtn.disabled = cameraActive;
+            stopCameraBtn.disabled = !cameraActive;
+            startOverlayBtn.disabled = isRunning || !cameraActive || !fileLoaded;
+            stopOverlayBtn.disabled = !isRunning;
+            
+            // ファイルがロードされていない場合、動画のコントロールを非表示にする
+            videoFile.controls = fileLoaded;
+        }
+
+        // =================================================================
+        // カメラ制御
+        // =================================================================
+
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "user" },
+                });
+                cameraVideo.srcObject = stream;
+                streamGlobal = stream; // 停止のためにグローバルに保持
+                cameraActive = true;
+                displayMessage("カメラが起動しました。", "info");
+            } catch (error) {
+                console.error("カメラへのアクセスに失敗しました:", error);
+                displayMessage("カメラへのアクセスが許可されていません。ブラウザの設定を確認してください。", "error");
+            } finally {
+                updateUI();
+            }
+        }
+
+        function stopCamera() {
+            if (streamGlobal) {
+                streamGlobal.getTracks().forEach(track => track.stop());
+                cameraVideo.srcObject = null;
+                streamGlobal = null;
+            }
+            cameraActive = false;
+            stopOverlay(); // カメラ停止時はオーバーレイも停止
+            displayMessage("カメラが停止しました。", "info");
+            updateUI();
+        }
+
+        // =================================================================
+        // ファイル入力処理
+        // =================================================================
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files?.[0];
+            if (file) {
+                const url = URL.createObjectURL(file);
+                videoFile.src = url;
+                videoFile.load(); // メタデータロードを促す
+                displayMessage("映像ファイルを選択しました。ロード中です...", "info");
+            }
+            updateUI();
+        });
+
+        // 映像ファイルがロードされたときの処理 (Canvasの縦横比を設定)
+        videoFile.addEventListener('loadedmetadata', () => {
+            if (videoFile.videoWidth > 0 && videoFile.videoHeight > 0) {
+                // CanvasコンテナのCSSアスペクト比を設定
+                canvasContainer.style.aspectRatio = `${videoFile.videoWidth} / ${videoFile.videoHeight}`;
+                displayMessage("映像ファイルのメタデータがロードされました。", "info");
+            }
+            stopOverlay(); // 映像が変わったら強制停止
+            videoFile.currentTime = 0;
+            updateUI();
+        });
+
+        // =================================================================
+        // 合成制御
+        // =================================================================
+        function startOverlay() {
+            if (!videoFile.src || !cameraActive) {
+                displayMessage("映像ファイルが選択されていることと、カメラが起動していることを確認してください。", "error");
+                return;
+            }
+
+            if (videoFile.readyState < 2) {
+                 displayMessage("映像ファイルのロードが完了していません。少し待ってから再度お試しください。", "error");
+                 return;
+            }
+            
+            // 【問題解消】映像ファイルを明示的に再生
+            videoFile.play().catch(error => {
+                // 自動再生がブロックされた場合のエラー処理（Mutedなので基本発生しないはず）
+                console.error("Video playback failed:", error);
+            });
+
+            isRunning = true;
+            processFrame();
+            displayMessage("リアルタイム合成を開始しました。", "info");
+            updateUI();
+        }
+
+        function stopOverlay() {
+            isRunning = false;
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
+            }
+            videoFile.pause();
+            displayMessage("リアルタイム合成を停止しました。", "info");
+            updateUI();
+        }
+
+        // =================================================================
+        // フレーム処理（コアロジック）
+        // =================================================================
+        function processFrame() {
+            if (!isRunning || !canvas || videoFile.readyState < 2 || cameraVideo.readyState < 2) {
+                // 停止中の場合、アニメーションフレームのループを終了
+                if (isRunning) {
+                     animationFrameId = requestAnimationFrame(processFrame);
+                }
+                return;
+            }
+
+            const ctx = canvas.getContext("2d", { willReadFrequently: true });
+            if (!ctx) return;
+
+            // 描画が歪む問題対策: キャンバスの論理サイズを背景映像のネイティブ解像度に設定
+            const videoWidth = videoFile.videoWidth;
+            const videoHeight = videoFile.videoHeight;
+            canvas.width = videoWidth;
+            canvas.height = videoHeight;
+            
+            // 1. 背景映像（ファイル）を描画
+            ctx.drawImage(videoFile, 0, 0, videoWidth, videoHeight);
+
+            // 2. 背景映像のピクセルデータを取得
+            const imageData = ctx.getImageData(0, 0, videoWidth, videoHeight);
+            const data = imageData.data;
+
+            // 3. カメラ映像を一時的なキャンバスに描画（アスペクト比を維持し、左右反転）
+            const tempCanvas = document.createElement("canvas");
+            tempCanvas.width = videoWidth;
+            tempCanvas.height = videoHeight;
+            const tempCtx = tempCanvas.getContext("2d");
+            if (!tempCtx) return;
+
+            const cameraAspect = cameraVideo.videoWidth / cameraVideo.videoHeight;
+            const canvasAspect = videoWidth / videoHeight;
+
+            let drawWidth = videoWidth;
+            let drawHeight = videoHeight;
+            let offsetX = 0;
+            let offsetY = 0;
+
+            // 【アスペクト比修正】カメラ映像がキャンバス全体を覆うように描画サイズを調整 (Coverモード)
+            // この計算により、カメラ映像の歪みを防ぎ、キャンバス全体にフィットさせます
+            if (cameraAspect > canvasAspect) {
+                drawHeight = videoHeight;
+                drawWidth = videoHeight * cameraAspect;
+                offsetX = (videoWidth - drawWidth) / 2;
+            } else {
+                drawWidth = videoWidth;
+                drawHeight = videoWidth / cameraAspect;
+                offsetY = (videoHeight - drawHeight) / 2;
+            }
+
+            // 左右反転を適用 (自撮りカメラのように)
+            tempCtx.save();
+            tempCtx.translate(videoWidth, 0);
+            tempCtx.scale(-1, 1);
+            tempCtx.drawImage(cameraVideo, offsetX, offsetY, drawWidth, drawHeight);
+            tempCtx.restore();
+
+            const cameraImageData = tempCtx.getImageData(0, 0, videoWidth, videoHeight);
+            const cameraData = cameraImageData.data;
+
+            // 4. ピクセル処理（クロマキー + 円形合成）
+            const greenThreshold = 80; // 緑色の判定閾値
+
+            // 円のパラメータを定義 (映像の中心に固定された真円)
+            const circle = {
+                x: videoWidth / 2,
+                y: videoHeight / 2,
+                r: Math.min(videoWidth, videoHeight) * 0.3, // 半径を短辺の30%に設定
+            };
+            const circleRsq = circle.r * circle.r; // 距離比較のために半径の二乗を計算
+
+            for (let i = 0; i < data.length; i += 4) {
+                const r = data[i];
+                const g = data[i + 1];
+                const b = data[i + 2];
+
+                // 1. 背景映像の緑色判定
+                const isGreen = g > r + greenThreshold && g > b + greenThreshold;
+
+                if (isGreen) {
+                    const pixelIndex = i / 4;
+                    const x = pixelIndex % videoWidth;
+                    const y = Math.floor(pixelIndex / videoWidth);
+
+                    // 2. 円形領域判定
+                    const dx = x - circle.x;
+                    const dy = y - circle.y;
+                    const distanceSq = dx * dx + dy * dy;
+                    const isInCircle = distanceSq <= circleRsq;
+
+                    if (isInCircle) {
+                        // 円形領域内の緑色の場合: カメラ映像で置き換え
+                        data[i] = cameraData[i];
+                        data[i + 1] = cameraData[i + 1];
+                        data[i + 2] = cameraData[i + 2];
+                        data[i + 3] = cameraData[i + 3]; // アルファ値もコピー
+                    } else {
+                        // 円形領域外の緑色の場合: 透明化
+                        data[i + 3] = 0; // アルファ値を0にして透明にする
+                    }
+                }
+            }
+
+            ctx.putImageData(imageData, 0, 0);
+
+            if (isRunning) {
+                animationFrameId = requestAnimationFrame(processFrame);
+            }
+        }
+
+        // =================================================================
+        // 初期設定とイベントリスナー
+        // =================================================================
+        window.onload = function() {
+            // イベントリスナーの追加
+            startCameraBtn.addEventListener('click', startCamera);
+            stopCameraBtn.addEventListener('click', stopCamera);
+            startOverlayBtn.addEventListener('click', startOverlay);
+            stopOverlayBtn.addEventListener('click', stopOverlay);
+            
+            // 初回UI更新
+            updateUI();
+        };
+
+        // ページが閉じられる前のクリーンアップ
+        window.addEventListener('beforeunload', stopCamera);
+
+    </script>
+</body>
+</html>
